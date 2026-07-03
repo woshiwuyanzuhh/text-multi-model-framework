@@ -1,0 +1,49 @@
+# ============================================================
+# docker-compose.yml — 一键编排推理服务
+# 用法:
+#   启动服务:  docker compose up -d
+#   停止服务:  docker compose down
+#   查看日志:  docker compose logs -f api
+# ============================================================
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tmf-api:latest
+    container_name: tmf-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - FLASK_ENV=production
+      # 生产环境必须传入真实 SECRET_KEY（BaseConfig 会拒绝随机值）
+      - SECRET_KEY=${SECRET_KEY}
+      # API 接口认证密钥（必须设置，否则服务拒绝启动）
+      - API_KEY=${API_KEY}
+      # CORS 白名单（逗号分隔，默认仅允许本地）
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:8080}
+      # V4 大模型 API 配置
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME:-gpt-3.5-turbo}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_TIMEOUT=${LLM_TIMEOUT:-30}
+      # API 输入文本最大长度（字符数，默认 5000）
+      - MAX_TEXT_LENGTH=${MAX_TEXT_LENGTH:-5000}
+      # API 限流配置（按客户端 IP 限流）
+      - RATE_LIMIT_LOCAL=${RATE_LIMIT_LOCAL:-60 per minute}
+      - RATE_LIMIT_LLM=${RATE_LIMIT_LLM:-10 per minute}
+    volumes:
+      # 挂载模型目录，方便热替换模型文件，无需重新构建镜像
+      - ./models:/app/models:ro
+      - ./logs:/app/logs
+    # 生产环境资源限制（防止 OOM 影响宿主机）
+    mem_limit: 4g
+    cpus: 4.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

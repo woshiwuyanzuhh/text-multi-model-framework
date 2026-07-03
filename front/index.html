@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TMF 文本分类预测平台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 极少量自定义样式，主体使用 Tailwind 原子类 */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                         "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            background-color: #f8fafc; /* slate-50 */
+        }
+        /* 自定义滚动条，避免突兀 */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        ::-webkit-scrollbar-track { background: transparent; }
+
+        /* 复选框美化 */
+        .version-card input[type="checkbox"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px; height: 18px;
+            border: 1.5px solid #cbd5e1;
+            border-radius: 5px;
+            background: #fff;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            position: relative;
+            flex-shrink: 0;
+        }
+        .version-card input[type="checkbox"]:checked {
+            background: #4f46e5; /* indigo-600 */
+            border-color: #4f46e5;
+        }
+        .version-card input[type="checkbox"]:checked::after {
+            content: '';
+            position: absolute;
+            left: 5px; top: 1px;
+            width: 5px; height: 10px;
+            border: solid #fff;
+            border-width: 0 2px 2px 0;
+            transform: rotate(45deg);
+        }
+        .version-card:hover {
+            border-color: #c7d2fe;
+            background: #f5f3ff;
+        }
+        .version-card.active {
+            border-color: #6366f1;
+            background: #eef2ff;
+        }
+
+        /* 进度条平滑动画 */
+        .progress-bar-inner {
+            transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* 表格行淡入 */
+        @keyframes rowFadeIn {
+            from { opacity: 0; transform: translateY(-4px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .row-enter {
+            animation: rowFadeIn 0.25s ease-out;
+        }
+
+        /* 按钮 loading 态 */
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        /* 文本截断单元格 hover 展开 */
+        .text-cell {
+            max-width: 320px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .text-cell:hover {
+            white-space: normal;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body class="text-slate-800 min-h-screen">
+
+<div class="max-w-7xl mx-auto px-6 py-8">
+
+    <!-- ============ 顶部标题区 ============ -->
+    <header class="mb-8">
+        <div class="flex items-center gap-3 mb-2">
+            <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center shadow-sm">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                </svg>
+            </div>
+            <h1 class="text-2xl font-semibold text-slate-800">TMF 文本分类预测平台</h1>
+        </div>
+        <p class="text-sm text-slate-500" style="margin-left: 3.25rem;">
+            支持单条 / 批量预测，支持 v1（传统ML）/ v2（fastText）/ v3（BERT）/ v4（大模型DS）多接口并发对比
+        </p>
+    </header>
+
+    <!-- ============ 控制区：接口选择 ============ -->
+    <section class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-6">
+        <div class="flex items-center gap-2 mb-3">
+            <label for="apiKeyInput" class="text-xs font-medium text-slate-500 uppercase tracking-wide whitespace-nowrap">API Key</label>
+            <input id="apiKeyInput" type="password" placeholder="输入 API Key"
+                   class="flex-1 px-3 py-1.5 text-sm rounded-lg border border-slate-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 outline-none transition-all">
+        </div>
+        <label class="block text-xs font-medium text-slate-500 mb-2 uppercase tracking-wide">
+            接口版本（可多选对比）
+        </label>
+        <div id="versionGroup" class="flex flex-wrap gap-2">
+            <label class="version-card active flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 cursor-pointer transition-all">
+                <input type="checkbox" value="v1" checked>
+                <span class="text-sm font-medium">v1</span>
+                <span class="text-xs text-slate-400">传统ML</span>
+            </label>
+            <label class="version-card active flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 cursor-pointer transition-all">
+                <input type="checkbox" value="v2" checked>
+                <span class="text-sm font-medium">v2</span>
+                <span class="text-xs text-slate-400">fastText</span>
+            </label>
+            <label class="version-card active flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 cursor-pointer transition-all">
+                <input type="checkbox" value="v3" checked>
+                <span class="text-sm font-medium">v3</span>
+                <span class="text-xs text-slate-400">BERT</span>
+            </label>
+            <label class="version-card active flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 cursor-pointer transition-all">
+                <input type="checkbox" value="v4" checked>
+                <span class="text-sm font-medium">v4</span>
+                <span class="text-xs text-slate-400">大模型</span>
+            </label>
+        </div>
+    </section>
+
+    <!-- ============ 单条 + 批量 输入区 ============ -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+
+        <!-- 单条预测 -->
+        <section class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <h2 class="text-base font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                <span class="w-1.5 h-5 bg-indigo-600 rounded-full"></span>
+                单条预测
+            </h2>
+            <textarea id="singleInput" rows="5"
+                      placeholder="请输入要分类的中文文本，例如：央行宣布降低存款准备金率 0.5 个百分点..."
+                      class="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 outline-none transition-all resize-none"></textarea>
+            <div class="flex justify-between items-center mt-3">
+                <span id="singleCounter" class="text-xs text-slate-400">0 / 5000 字</span>
+                <button id="singlePredictBtn"
+                        class="btn-primary px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-all shadow-sm flex items-center gap-2">
+                    <svg id="singleSpinner" class="hidden w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                    <span id="singleBtnText">开始预测</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- 批量预测 -->
+        <section class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <h2 class="text-base font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                <span class="w-1.5 h-5 bg-emerald-600 rounded-full"></span>
+                批量预测
+            </h2>
+            <label for="fileInput" class="block">
+                <div class="border-2 border-dashed border-slate-200 rounded-lg p-5 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition-all">
+                    <svg class="w-8 h-8 mx-auto text-slate-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                              d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                    <p class="text-sm text-slate-600 font-medium">点击或拖拽文件到此处</p>
+                    <p class="text-xs text-slate-400 mt-1">支持 .txt（每行一条）/ .csv</p>
+                    <input id="fileInput" type="file" accept=".txt,.csv" class="hidden">
+                </div>
+            </label>
+            <div id="fileInfo" class="hidden mt-2 text-xs text-slate-500 flex items-center justify-between">
+                <span id="fileName"></span>
+                <span id="fileCount"></span>
+            </div>
+            <div class="flex justify-end items-center mt-3 gap-3">
+                <span class="text-xs text-slate-400">并发数：
+                    <select id="concurrency" class="ml-1 px-2 py-1 text-xs rounded border border-slate-200 focus:border-indigo-400 outline-none">
+                        <option value="3">3</option>
+                        <option value="5" selected>5</option>
+                        <option value="8">8</option>
+                        <option value="10">10</option>
+                    </select>
+                </span>
+                <button id="batchPredictBtn"
+                        class="btn-primary px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-all shadow-sm flex items-center gap-2">
+                    <svg id="batchSpinner" class="hidden w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                    <span id="batchBtnText">开始批量预测</span>
+                </button>
+            </div>
+        </section>
+    </div>
+
+    <!-- ============ 进度条 + 成功率统计 ============ -->
+    <section id="statsSection" class="hidden bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-6">
+        <!-- 进度条 -->
+        <div class="mb-5">
+            <div class="flex justify-between items-center mb-2">
+                <span class="text-sm font-medium text-slate-700">批量处理进度</span>
+                <span id="progressText" class="text-sm text-slate-500">0 / 0 (0%)</span>
+            </div>
+            <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div id="progressBar" class="progress-bar-inner h-full bg-emerald-500 rounded-full" style="width: 0%"></div>
+            </div>
+        </div>
+        <!-- 各接口成功率卡片 -->
+        <div id="successCards" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+    </section>
+
+    <!-- ============ 结果表格 ============ -->
+    <section class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="flex items-center justify-between p-4 border-b border-slate-100">
+            <h2 class="text-base font-semibold text-slate-800 flex items-center gap-2">
+                <span class="w-1.5 h-5 bg-slate-700 rounded-full"></span>
+                预测结果
+            </h2>
+            <div class="flex items-center gap-2">
+                <span id="resultCount" class="text-xs text-slate-400">0 条记录</span>
+                <button id="clearBtn" class="hidden px-3 py-1 text-xs text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300 rounded transition-all">
+                    清空
+                </button>
+                <button id="exportBtn" class="hidden px-3 py-1 text-xs text-indigo-600 hover:text-indigo-700 border border-indigo-200 hover:border-indigo-300 rounded transition-all">
+                    导出 CSV
+                </button>
+            </div>
+        </div>
+        <div class="overflow-x-auto max-h-[600px]">
+            <table class="w-full text-sm">
+                <thead class="bg-slate-50 sticky top-0 z-10">
+                    <tr class="text-left text-xs text-slate-500 uppercase tracking-wide">
+                        <th class="px-4 py-3 font-medium">#</th>
+                        <th class="px-4 py-3 font-medium">输入文本</th>
+                        <th class="px-4 py-3 font-medium">v1 结果</th>
+                        <th class="px-4 py-3 font-medium">v2 结果</th>
+                        <th class="px-4 py-3 font-medium">v3 结果</th>
+                        <th class="px-4 py-3 font-medium">v4 结果</th>
+                        <th class="px-4 py-3 font-medium">状态</th>
+                    </tr>
+                </thead>
+                <tbody id="resultBody" class="divide-y divide-slate-100">
+                    <tr id="emptyRow">
+                        <td colspan="7" class="px-4 py-16 text-center text-slate-400">
+                            <svg class="w-12 h-12 mx-auto mb-2 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                                      d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            <p class="text-sm">暂无预测结果，请输入文本或上传文件后开始预测</p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ============ 最近预测历史（LocalStorage 持久化） ============ -->
+    <section class="mt-6 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="flex items-center justify-between p-4 border-b border-slate-100">
+            <h2 id="historyToggle" class="text-base font-semibold text-slate-800 flex items-center gap-2 cursor-pointer select-none">
+                <span class="w-1.5 h-5 bg-indigo-500 rounded-full"></span>
+                🕒 最近预测历史
+                <svg id="historyChevron" class="w-4 h-4 text-slate-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+                <span id="historyCount" class="ml-1 text-xs text-slate-400 font-normal"></span>
+            </h2>
+            <button id="clearHistoryBtn" class="hidden px-3 py-1 text-xs text-slate-500 hover:text-red-600 border border-slate-200 hover:border-red-300 rounded transition-all">
+                清空历史
+            </button>
+        </div>
+        <div id="historyBody">
+            <div id="historyEmpty" class="px-4 py-10 text-center text-slate-400">
+                <p class="text-sm">暂无历史记录，单条预测成功后会自动保存（最多 10 条）</p>
+            </div>
+            <ul id="historyList" class="hidden divide-y divide-slate-100 max-h-[400px] overflow-y-auto"></ul>
+        </div>
+    </section>
+
+    <footer class="mt-8 text-center text-xs text-slate-400">
+        TMF 文本分类预测平台 &middot; v1 / v2 / v3 / v4 多接口对比
+    </footer>
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    // ============ 配置 ============
+    const VERSIONS = ['v1', 'v2', 'v3', 'v4'];
+    const VERSION_COLORS = {
+        v1: 'bg-blue-100 text-blue-700',
+        v2: 'bg-purple-100 text-purple-700',
+        v3: 'bg-amber-100 text-amber-700',
+        v4: 'bg-emerald-100 text-emerald-700'
+    };
+    const VERSION_DOT = {
+        v1: 'bg-blue-500', v2: 'bg-purple-500', v3: 'bg-amber-500', v4: 'bg-emerald-500'
+    };
+
+    // 动态获取后端地址，与前端同源（通过 /ui 路由服务时自动匹配）
+    const API_BASE = window.location.origin;
+
+    // 输入文本最大长度（与后端 MAX_TEXT_LENGTH 保持一致）
+    const MAX_TEXT_LENGTH = 5000;
+
+    // API Key 管理：从 localStorage 读取，输入时自动保存
+    const apiKeyInput = document.getElementById('apiKeyInput');
+    apiKeyInput.value = localStorage.getItem('tmf_api_key') || '';
+    apiKeyInput.addEventListener('input', () => {
+        localStorage.setItem('tmf_api_key', apiKeyInput.value);
+    });
+    function getAuthHeaders() {
+        const key = apiKeyInput.value.trim();
+        return key ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` }
+                   : { 'Content-Type': 'application/json' };
+    }
+
+    // 类别中英文映射（fallback: 未命中显示原 label）
+    const CATEGORY_MAP = {
+        'tech': '科技数码',
+        'finance': '金融财经',
+        'realty': '房产家居',
+        'stocks': '股市行情',
+        'education': '教育文化',
+        'science': '科学探索',
+        'society': '社会民生',
+        'politics': '时政要闻',
+        'sports': '体育竞技',
+        'game': '游戏电竞',
+        'entertainment': '娱乐影视'
+    };
+    function getCategoryName(label) {
+        return CATEGORY_MAP[label] || label;
+    }
+
+    // 置信度配色：>80% 绿 / 50-80% 蓝 / <50% 红
+    function getConfidenceColor(pct) {
+        if (pct >= 80) return 'bg-emerald-500';
+        if (pct >= 50) return 'bg-blue-500';
+        return 'bg-red-500';
+    }
+
+    // 历史记录配置
+    const HISTORY_KEY = 'tmf_history';
+    const HISTORY_MAX = 10;
+
+    // ============ DOM ============
+    const $ = (id) => document.getElementById(id);
+    const versionGroup = $('versionGroup');
+    const singleInput = $('singleInput');
+    const singleCounter = $('singleCounter');
+    const singlePredictBtn = $('singlePredictBtn');
+    const singleSpinner = $('singleSpinner');
+    const singleBtnText = $('singleBtnText');
+    const fileInput = $('fileInput');
+    const fileInfo = $('fileInfo');
+    const fileName = $('fileName');
+    const fileCount = $('fileCount');
+    const concurrencySelect = $('concurrency');
+    const batchPredictBtn = $('batchPredictBtn');
+    const batchSpinner = $('batchSpinner');
+    const batchBtnText = $('batchBtnText');
+    const statsSection = $('statsSection');
+    const progressBar = $('progressBar');
+    const progressText = $('progressText');
+    const successCards = $('successCards');
+    const resultBody = $('resultBody');
+    const emptyRow = $('emptyRow');
+    const resultCount = $('resultCount');
+    const clearBtn = $('clearBtn');
+    const exportBtn = $('exportBtn');
+    // 历史记录 DOM
+    const historyToggle = $('historyToggle');
+    const historyChevron = $('historyChevron');
+    const historyCount = $('historyCount');
+    const historyEmpty = $('historyEmpty');
+    const historyList = $('historyList');
+    const historyBody = $('historyBody');
+    const clearHistoryBtn = $('clearHistoryBtn');
+
+    // ============ 状态 ============
+    let batchRunning = false;
+    let allResults = []; // 全部结果，用于导出
+    let singleElapsedTimer = null;  // 单条预测实时耗时计时器
+    let singleElapsedStart = 0;
+
+    // ============ 工具：获取选中版本 ============
+    function getSelectedVersions() {
+        const checked = [...versionGroup.querySelectorAll('input[type=checkbox]:checked')].map(el => el.value);
+        return checked.length ? checked : VERSIONS.slice();
+    }
+
+    // ============ 工具：获取完整 API URL（硬编码） ============
+    function getApiUrl(version) {
+        return `${API_BASE}/api/${version}/predict`;
+    }
+
+    // ============ 工具：版本卡片激活态 ============
+    function refreshVersionCards() {
+        versionGroup.querySelectorAll('.version-card').forEach(card => {
+            const cb = card.querySelector('input[type=checkbox]');
+            card.classList.toggle('active', cb.checked);
+        });
+    }
+    versionGroup.addEventListener('change', refreshVersionCards);
+    refreshVersionCards();
+
+    // ============ 字数统计 ============
+    singleInput.addEventListener('input', () => {
+        const len = singleInput.value.length;
+        singleCounter.textContent = `${len} / ${MAX_TEXT_LENGTH} 字`;
+        singleCounter.classList.toggle('text-red-500', len > MAX_TEXT_LENGTH);
+        singleCounter.classList.toggle('text-slate-400', len <= MAX_TEXT_LENGTH);
+    });
+
+    // ============ 文件选择 ============
+    fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const lines = await readLinesFromFile(file);
+        fileName.textContent = file.name;
+        fileCount.textContent = `${lines.length} 条`;
+        fileInfo.classList.remove('hidden');
+        fileInput.dataset.lines = JSON.stringify(lines);
+    });
+
+    function readLinesFromFile(file) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const text = ev.target.result || '';
+                // 兼容 txt/csv：按 \n 分割，trim 后过滤空行
+                const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+                resolve(lines);
+            };
+            reader.onerror = () => resolve([]);
+            reader.readAsText(file, 'UTF-8');
+        });
+    }
+
+    // ============ 单接口调用 ============
+    async function callPredict(version, text, timeoutMs = 60000) {
+        const url = getApiUrl(version);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ text }),
+                signal: controller.signal
+            });
+            if (!resp.ok) {
+                // 尝试解析 JSON body（后端对 429 限流等错误也返回 JSON）
+                try {
+                    const errData = await resp.json();
+                    return { code: errData.code || -100, message: errData.message || `HTTP ${resp.status}`, label: null };
+                } catch (_) {
+                    return { code: -100, message: `HTTP ${resp.status}`, label: null };
+                }
+            }
+            const data = await resp.json();
+            return data;
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                return { code: -101, message: '请求超时', label: null };
+            }
+            return { code: -102, message: (err.message || '网络错误').slice(0, 60), label: null };
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    // ============ 多版本并发调用 ============
+    async function predictText(text, selectedVersions) {
+        const tasks = selectedVersions.map(v => callPredict(v, text).then(r => [v, r]));
+        const results = await Promise.all(tasks);
+        const map = {};
+        results.forEach(([v, r]) => { map[v] = r; });
+        return map;
+    }
+
+    // ============ 并发池（核心）============
+    async function runConcurrentPool(items, workerFn, concurrency, onProgress) {
+        let index = 0;
+        let completed = 0;
+        const total = items.length;
+        async function worker() {
+            while (index < items.length) {
+                const myIndex = index++;
+                try {
+                    await workerFn(items[myIndex], myIndex);
+                } catch (e) {
+                    console.error('worker error', e);
+                }
+                completed++;
+                onProgress(completed, total);
+            }
+        }
+        const workers = Array.from({ length: Math.min(concurrency, total) }, () => worker());
+        await Promise.all(workers);
+    }
+
+    // ============ 渲染：单条结果到表格 ============
+    function renderResultRow(text, results, idx, animate = true) {
+        if (emptyRow && emptyRow.parentNode) emptyRow.remove();
+
+        const tr = document.createElement('tr');
+        if (animate) tr.classList.add('row-enter');
+        tr.className = 'hover:bg-slate-50 transition-colors';
+
+        const cells = [];
+
+        // 序号
+        cells.push(`<td class="px-4 py-3 text-slate-400 text-xs">${idx + 1}</td>`);
+        // 输入文本
+        cells.push(`<td class="px-4 py-3 text-cell text-slate-700" title="${escapeHtml(text)}">${escapeHtml(text)}</td>`);
+
+        // 各版本结果（中文类别 + 置信度可视化）
+        let allOk = true;
+        VERSIONS.forEach(v => {
+            const r = results[v];
+            if (!r) {
+                cells.push(`<td class="px-4 py-3 text-slate-300 text-xs">—</td>`);
+                return;
+            }
+            if (r.code === 0 && r.label) {
+                const chineseName = getCategoryName(r.label);
+                // 置信度展示：>80% 绿 / 50-80% 蓝 / <50% 红
+                let confidenceHtml = '';
+                if (typeof r.confidence === 'number' && !isNaN(r.confidence)) {
+                    const pct = Math.max(0, Math.min(100, r.confidence * 100));
+                    const confColor = getConfidenceColor(pct);
+                    confidenceHtml = `
+                        <div class="flex items-center gap-1.5 mt-1">
+                            <div class="w-14 h-1 bg-slate-200 rounded-full overflow-hidden">
+                                <div class="h-full ${confColor} rounded-full transition-all duration-300" style="width: ${pct}%"></div>
+                            </div>
+                            <span class="text-xs text-slate-500">${pct.toFixed(0)}%</span>
+                        </div>`;
+                }
+                cells.push(`
+                    <td class="px-4 py-3">
+                        <div class="flex flex-col">
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${VERSION_COLORS[v]} w-fit">
+                                <span class="w-1.5 h-1.5 rounded-full ${VERSION_DOT[v]}"></span>
+                                ${escapeHtml(chineseName)}
+                            </span>
+                            ${confidenceHtml}
+                        </div>
+                    </td>`);
+            } else {
+                allOk = false;
+                const errMsg = r.message || `code:${r.code}`;
+                cells.push(`
+                    <td class="px-4 py-3">
+                        <span class="text-xs text-red-500" title="${escapeHtml(errMsg)}">
+                            ✕ ${escapeHtml(errMsg.slice(0, 12))}
+                        </span>
+                    </td>`);
+            }
+        });
+
+        // 状态
+        if (allOk && Object.keys(results).length > 0) {
+            // 检查所有结果是否一致
+            const labels = VERSIONS.filter(v => results[v]).map(v => results[v].label);
+            const consistent = labels.every(l => l === labels[0]);
+            if (consistent) {
+                cells.push(`<td class="px-4 py-3"><span class="text-xs text-emerald-600 font-medium">✓ 一致</span></td>`);
+            } else {
+                cells.push(`<td class="px-4 py-3"><span class="text-xs text-amber-600 font-medium">⚠ 不一致</span></td>`);
+            }
+        } else {
+            cells.push(`<td class="px-4 py-3"><span class="text-xs text-red-500 font-medium">✕ 失败</span></td>`);
+        }
+
+        tr.innerHTML = cells.join('');
+        resultBody.appendChild(tr);
+        allResults.push({ text, results });
+
+        resultCount.textContent = `${allResults.length} 条记录`;
+        clearBtn.classList.remove('hidden');
+        exportBtn.classList.remove('hidden');
+    }
+
+
+    function escapeHtml(str) {
+        if (str == null) return '';
+        return String(str).replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    // ============ 渲染：成功率卡片 ============
+    function renderSuccessCards(stats, selectedVersions) {
+        successCards.innerHTML = '';
+        selectedVersions.forEach(v => {
+            const s = stats[v] || { total: 0, success: 0 };
+            const rate = s.total === 0 ? 0 : (s.success / s.total * 100);
+            const colorMap = {
+                v1: 'border-blue-200', v2: 'border-purple-200',
+                v3: 'border-amber-200', v4: 'border-emerald-200'
+            };
+            const barColor = {
+                v1: 'bg-blue-500', v2: 'bg-purple-500',
+                v3: 'bg-amber-500', v4: 'bg-emerald-500'
+            };
+            const card = document.createElement('div');
+            card.className = `p-3 rounded-lg border ${colorMap[v]} bg-slate-50/50`;
+            card.innerHTML = `
+                <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-semibold text-slate-700 uppercase">${v}</span>
+                    <span class="text-sm font-bold text-slate-800">${rate.toFixed(1)}%</span>
+                </div>
+                <div class="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden mb-1.5">
+                    <div class="h-full ${barColor[v]} rounded-full transition-all duration-300" style="width: ${rate}%"></div>
+                </div>
+                <div class="text-xs text-slate-500">${s.success} / ${s.total} 成功</div>
+            `;
+            successCards.appendChild(card);
+        });
+    }
+
+    // ============ 渲染：进度条 ============
+    function updateProgress(done, total) {
+        const pct = total === 0 ? 0 : (done / total * 100);
+        progressBar.style.width = `${pct}%`;
+        progressText.textContent = `${done} / ${total} (${pct.toFixed(1)}%)`;
+    }
+
+    // ============ 单条预测 ============
+    singlePredictBtn.addEventListener('click', async () => {
+        const text = singleInput.value.trim();
+        if (!text) {
+            alert('请输入要分类的文本');
+            return;
+        }
+        if (text.length > MAX_TEXT_LENGTH) {
+            alert(`输入文本过长（${text.length} 字），最大允许 ${MAX_TEXT_LENGTH} 字`);
+            return;
+        }
+        const versions = getSelectedVersions();
+        if (versions.length === 0) {
+            alert('请至少选择一个接口版本');
+            return;
+        }
+
+        // loading + 启动实时耗时计时器（缓解 v4 ~1.5s 等待焦虑）
+        singlePredictBtn.disabled = true;
+        singleSpinner.classList.remove('hidden');
+        singleElapsedStart = Date.now();
+        singleBtnText.textContent = '预测中... 0.0s';
+        singleElapsedTimer = setInterval(() => {
+            const sec = ((Date.now() - singleElapsedStart) / 1000).toFixed(1);
+            singleBtnText.textContent = `预测中... ${sec}s`;
+        }, 100);
+
+        try {
+            const results = await predictText(text, versions);
+            renderResultRow(text, results, allResults.length);
+            // 单条预测成功后写入历史
+            saveToHistory(text, results);
+        } catch (e) {
+            alert('预测失败：' + (e.message || e));
+        } finally {
+            // 清除计时器并恢复按钮
+            if (singleElapsedTimer) {
+                clearInterval(singleElapsedTimer);
+                singleElapsedTimer = null;
+            }
+            singlePredictBtn.disabled = false;
+            singleSpinner.classList.add('hidden');
+            singleBtnText.textContent = '开始预测';
+        }
+    });
+
+    // ============ 批量预测 ============
+    batchPredictBtn.addEventListener('click', async () => {
+        if (batchRunning) return;
+        const linesRaw = fileInput.dataset.lines;
+        if (!linesRaw) {
+            alert('请先上传文件');
+            return;
+        }
+        const lines = JSON.parse(linesRaw);
+        if (!lines.length) {
+            alert('文件内容为空');
+            return;
+        }
+        const versions = getSelectedVersions();
+        if (versions.length === 0) {
+            alert('请至少选择一个接口版本');
+            return;
+        }
+        const concurrency = parseInt(concurrencySelect.value, 10) || 5;
+
+        // 重置统计
+        batchRunning = true;
+        batchPredictBtn.disabled = true;
+        batchSpinner.classList.remove('hidden');
+        batchBtnText.textContent = '处理中...';
+        statsSection.classList.remove('hidden');
+
+        const stats = {};
+        versions.forEach(v => { stats[v] = { total: 0, success: 0 }; });
+        renderSuccessCards(stats, versions);
+        updateProgress(0, lines.length);
+
+        let done = 0;
+        await runConcurrentPool(lines, async (text, idx) => {
+            const results = await predictText(text, versions);
+            versions.forEach(v => {
+                stats[v].total++;
+                if (results[v] && results[v].code === 0 && results[v].label) {
+                    stats[v].success++;
+                }
+            });
+            renderResultRow(text, results, allResults.length);
+            done++;
+            updateProgress(done, lines.length);
+            renderSuccessCards(stats, versions);
+        }, concurrency, () => {});
+
+        batchRunning = false;
+        batchPredictBtn.disabled = false;
+        batchSpinner.classList.add('hidden');
+        batchBtnText.textContent = '开始批量预测';
+    });
+
+    // ============ 清空 ============
+    clearBtn.addEventListener('click', () => {
+        if (!confirm('确定清空所有结果吗？')) return;
+        allResults = [];
+        resultBody.innerHTML = `
+            <tr id="emptyRow">
+                <td colspan="7" class="px-4 py-16 text-center text-slate-400">
+                    <p class="text-sm">已清空，请输入文本或上传文件后开始预测</p>
+                </td>
+            </tr>`;
+        resultCount.textContent = '0 条记录';
+        clearBtn.classList.add('hidden');
+        exportBtn.classList.add('hidden');
+        statsSection.classList.add('hidden');
+    });
+
+    // ============ 导出 CSV ============
+    exportBtn.addEventListener('click', () => {
+        if (!allResults.length) return;
+        const header = ['序号', '输入文本', ...VERSIONS, '状态'];
+        const rows = allResults.map((r, i) => {
+            const cells = [i + 1, r.text];
+            let allOk = true;
+            VERSIONS.forEach(v => {
+                const x = r.results[v];
+                if (x && x.code === 0 && x.label) {
+                    cells.push(x.label);
+                } else if (x) {
+                    allOk = false;
+                    cells.push(`[ERR]${x.message || x.code}`);
+                } else {
+                    cells.push('');
+                }
+            });
+            cells.push(allOk ? 'OK' : 'FAIL');
+            return cells;
+        });
+        const csv = [header, ...rows].map(row =>
+            row.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')
+        ).join('\n');
+        const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `tmf_results_${Date.now()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    // ============ 历史记录（LocalStorage 持久化） ============
+    function loadHistory() {
+        try {
+            const raw = localStorage.getItem(HISTORY_KEY);
+            return raw ? JSON.parse(raw) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function saveHistory(list) {
+        try {
+            localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+        } catch (e) {
+            console.warn('localStorage 写入失败', e);
+        }
+    }
+
+    function saveToHistory(text, results) {
+        const list = loadHistory();
+        list.unshift({
+            text,
+            results,
+            time: new Date().toLocaleString('zh-CN', { hour12: false })
+        });
+        if (list.length > HISTORY_MAX) list.length = HISTORY_MAX;
+        saveHistory(list);
+        renderHistory();
+    }
+
+    function renderHistory() {
+        const list = loadHistory();
+        historyCount.textContent = list.length ? `${list.length} 条` : '';
+
+        if (list.length === 0) {
+            historyEmpty.classList.remove('hidden');
+            historyList.classList.add('hidden');
+            clearHistoryBtn.classList.add('hidden');
+            return;
+        }
+
+        historyEmpty.classList.add('hidden');
+        historyList.classList.remove('hidden');
+        clearHistoryBtn.classList.remove('hidden');
+        historyList.innerHTML = '';
+
+        list.forEach((item) => {
+            const v4 = item.results.v4;
+            const v4Ok = v4 && v4.code === 0 && v4.label;
+            const v4Chinese = v4Ok ? getCategoryName(v4.label) : '—';
+            const v4ColorClass = v4Ok ? VERSION_COLORS.v4 : 'bg-slate-100 text-slate-500';
+            const v4DotClass = v4Ok ? VERSION_DOT.v4 : 'bg-slate-300';
+
+            // 置信度（如果有）
+            let confHtml = '';
+            if (v4Ok && typeof v4.confidence === 'number' && !isNaN(v4.confidence)) {
+                const pct = Math.max(0, Math.min(100, v4.confidence * 100));
+                confHtml = `<span class="text-xs text-slate-400">· ${pct.toFixed(0)}%</span>`;
+            }
+
+            const li = document.createElement('li');
+            li.className = 'px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors group';
+            li.title = '点击回填到单条输入框';
+            li.innerHTML = `
+                <div class="flex items-start justify-between gap-3">
+                    <div class="flex-1 min-w-0">
+                        <div class="text-sm text-slate-700 truncate group-hover:text-indigo-600 transition-colors" title="${escapeHtml(item.text)}">
+                            ${escapeHtml(item.text)}
+                        </div>
+                        <div class="flex items-center gap-2 mt-1 flex-wrap">
+                            <span class="text-xs text-slate-400">${escapeHtml(item.time)}</span>
+                            <span class="text-xs text-slate-300">·</span>
+                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${v4ColorClass}">
+                                <span class="w-1 h-1 rounded-full ${v4DotClass}"></span>
+                                v4: ${escapeHtml(v4Chinese)}
+                            </span>
+                            ${confHtml}
+                        </div>
+                    </div>
+                    <svg class="w-4 h-4 text-slate-300 group-hover:text-indigo-500 mt-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                    </svg>
+                </div>
+            `;
+            // 点击回填到单条输入框
+            li.addEventListener('click', () => {
+                singleInput.value = item.text;
+                singleInput.focus();
+                const len = item.text.length;
+                singleCounter.textContent = `${len} / ${MAX_TEXT_LENGTH} 字`;
+                singleCounter.classList.toggle('text-red-500', len > MAX_TEXT_LENGTH);
+                singleCounter.classList.toggle('text-slate-400', len <= MAX_TEXT_LENGTH);
+                singleInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            });
+            historyList.appendChild(li);
+        });
+    }
+
+    // 清空历史
+    clearHistoryBtn.addEventListener('click', () => {
+        if (!confirm('确定清空所有历史记录吗？')) return;
+        saveHistory([]);
+        renderHistory();
+    });
+
+    // 折叠 / 展开
+    historyToggle.addEventListener('click', () => {
+        historyBody.classList.toggle('hidden');
+        historyChevron.classList.toggle('rotate-180');
+    });
+
+    // ============ 页面初始化：加载历史 ============
+    renderHistory();
+
+})();
+</script>
+</body>
+</html>
